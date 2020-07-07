@@ -1,2 +1,2 @@
 # pci_mav
-Interface between the planner and the controller of MAVs. This is to use with the planner such as [gbplanner](https://github.com/unr-arl/gbplanner_ros)
+Interface between high-level planner and trajectory tracking controller of MAVs. This is to use with planners such as the graph-based exploration planner [gbplanner](https://github.com/unr-arl/gbplanner_ros)
