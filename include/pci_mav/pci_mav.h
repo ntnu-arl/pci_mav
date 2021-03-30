@@ -26,6 +26,10 @@ class PCIMAV : public PCIManager {
   bool executePath(const std::vector<geometry_msgs::Pose> &path,
                    std::vector<geometry_msgs::Pose> &modified_path,
                    ExecutionPathType path_type = ExecutionPathType::kLocalPath);
+  bool executePath(const std::vector<geometry_msgs::Pose> &path,
+                   std::vector<geometry_msgs::Pose> &modified_path,
+                   double,
+                   ExecutionPathType path_type = ExecutionPathType::kLocalPath);
   void setState(const geometry_msgs::Pose &pose);
   void setVelocity(double v);
   double getVelocity(ExecutionPathType path_type);

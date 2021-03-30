@@ -119,7 +119,13 @@ bool PCIMAV::initMotion() {
   }
 
   std::vector<geometry_msgs::Pose> path_new;
-  interpolatePath(init_path, path_new, v_init_max_, yaw_rate_max_);
+  if (run_mode_ == RunModeType::kSim)
+    interpolatePath(init_path, path_new, v_init_max_, yaw_rate_max_);
+  else if (run_mode_ == RunModeType::kReal)
+    path_new = init_path;
+  else
+    ROS_ERROR("PCIMAV::executePath --> Not support.");
+  
   n_seq_++;
   samples_array_.header.seq = n_seq_;
   samples_array_.header.stamp = ros::Time::now();
@@ -417,7 +423,168 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
     ROS_ERROR("PCIMAV::executePath --> Not support.");
   }
   ROS_WARN("PCI: Ready to trigger the planner.");
+  return true;
 }
+
+bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
+                               std::vector<geometry_msgs::Pose> &modified_path,
+                               double exec_time,
+                               ExecutionPathType path_type) {
+  if (path.size() <= 1) return false;  // require at least 2 nodes
+  ros::Duration(0.01).sleep();  // Unblock the thread to get latest odometry.
+  ros::spinOnce();
+
+  // Setting velocity
+  double v_max = v_max_;
+  if (path_type == ExecutionPathType::kHomingPath) {
+    v_max = v_homing_max_;
+  } else if ((path_type == ExecutionPathType::kNarrowEnvPath) ||
+             (path_type == ExecutionPathType::kManualPath)) {
+    v_max = v_narrow_env_max_;
+  }
+
+  std::vector<geometry_msgs::Pose> path_new = path;
+  if (path_type != ExecutionPathType::kManualPath) {
+    // Only modify for path derived from auto mode.
+    // Extend the path to current position if necessary to achieve better
+    // transition.
+    if (reconnectPath(path, path_new)) {
+      ROS_INFO("Reconnect done");
+    } else {
+      ROS_WARN(
+          "Unsafe to execute this path since it is too far from the current "
+          "position");
+      modified_path.push_back(current_pose_);
+      return false;
+    }
+
+    if (smooth_heading_enable_) {
+      allocateYawAlongPath(path_new);
+    }
+  }
+
+  // Return final path.
+  modified_path = path_new;
+  // Store this path for the next iteration.
+  executing_path_ = path_new;
+
+  // Execute the path.
+  if (run_mode_ == RunModeType::kSim) {
+    // In simulation, have to interpolate the path to make it works smoother,
+    // since it is using lee-controller.
+    n_seq_++;
+    std::vector<geometry_msgs::Pose> path_intp;
+    interpolatePath(path_new, path_intp);
+    samples_array_.header.seq = n_seq_;
+    samples_array_.header.stamp = ros::Time::now();
+    samples_array_.header.frame_id = world_frame_id_;
+    samples_array_.points.clear();
+    double time_sum = 0;
+    for (int i = 0; i < path_intp.size(); i++) {
+      double yaw = tf::getYaw(path_intp[i].orientation);
+      Eigen::Vector3d p(path_intp[i].position.x, path_intp[i].position.y,
+                        path_intp[i].position.z);
+      trajectory_point_.position_W.x() = p.x();
+      trajectory_point_.position_W.y() = p.y();
+      trajectory_point_.position_W.z() = p.z() + z_control_offset; // sim only.
+      trajectory_point_.setFromYaw(yaw);
+      mav_msgs::msgMultiDofJointTrajectoryPointFromEigen(
+          trajectory_point_, &trajectory_point_msg_);
+      time_sum += dt_;
+      trajectory_point_msg_.time_from_start = ros::Duration(time_sum);
+      samples_array_.points.push_back(trajectory_point_msg_);
+    }
+    trajectory_vis_pub_.publish(generateTrajectoryMarkerArray(samples_array_));
+    trajectory_pub_.publish(samples_array_);
+    pci_status_ = PCIStatus::kRunning;
+    double wait_time = time_sum;
+    if ((planner_trigger_lead_time_ > 0) &&
+        (planner_trigger_lead_time_ < time_sum)) {
+      wait_time -= planner_trigger_lead_time_;
+    }
+    double delta_wait = 0.1;
+    wait_time = exec_time;
+    while ((wait_time -= delta_wait) > 0.0 && (!force_stop_)) {
+      ros::Duration(delta_wait).sleep();
+      ros::spinOnce();
+    }
+    // If stop before the wait-time, trigger as an error.
+    // Need this to reset everything to default mode.
+    if (force_stop_) {
+      force_stop_ = false;
+      pci_status_ = PCIStatus::kError;
+    } else {
+      pci_status_ = PCIStatus::kReady;
+    }
+    ROS_INFO("Waiting done.");
+  } else if (run_mode_ == RunModeType::kReal) {
+    // No need to interpolate the path in case of MPC.
+    n_seq_++;
+    samples_array_.header.seq = n_seq_;
+    samples_array_.header.stamp = ros::Time::now();
+    samples_array_.header.frame_id = world_frame_id_;
+    samples_array_.points.clear();
+    double sum_time_from_start = 0.0;
+    for (int i = 0; i < path_new.size(); i++) {
+      double yaw = tf::getYaw(path_new[i].orientation);
+      Eigen::Vector3d p(path_new[i].position.x, path_new[i].position.y,
+                        path_new[i].position.z);
+      trajectory_point_.position_W.x() = p.x();
+      trajectory_point_.position_W.y() = p.y();
+      trajectory_point_.position_W.z() = p.z();
+      trajectory_point_.setFromYaw(yaw);
+      mav_msgs::msgMultiDofJointTrajectoryPointFromEigen(
+          trajectory_point_, &trajectory_point_msg_);
+      if (i > 0) {
+        Eigen::Vector3d p0(path_new[i - 1].position.x,
+                           path_new[i - 1].position.y,
+                           path_new[i - 1].position.z);
+        double seg_len = (p - p0).norm();
+        double yaw0 = tf::getYaw(path_new[i - 1].orientation);
+        double dyaw = yaw - yaw0;
+        if (dyaw > M_PI)
+          dyaw -= 2 * M_PI;
+        else if (dyaw < -M_PI)
+          dyaw += 2 * M_PI;
+
+        const double kEpsilon = 0.001;
+        sum_time_from_start +=
+            std::max(seg_len / v_max, std::abs(dyaw) / yaw_rate_max_) +
+            kEpsilon;  // to avoid the Nan issue for MPC.
+      }
+      trajectory_point_msg_.time_from_start =
+          ros::Duration(sum_time_from_start);
+      samples_array_.points.push_back(trajectory_point_msg_);
+    }
+    trajectory_vis_pub_.publish(generateTrajectoryMarkerArray(samples_array_));
+    trajectory_pub_.publish(samples_array_);
+
+    double wait_time = sum_time_from_start;
+    if ((planner_trigger_lead_time_ > 0) &&
+        (planner_trigger_lead_time_ < sum_time_from_start)) {
+      wait_time -= planner_trigger_lead_time_;
+    }
+    double delta_wait = 0.1;
+    wait_time = exec_time;
+    while ((wait_time -= delta_wait) > 0.0 && (!force_stop_)) {
+      ros::Duration(delta_wait).sleep();
+      ros::spinOnce();
+    }
+    // If stop before the wait-time, trigger as an error.
+    // Need this to reset everything to default mode.
+    if (force_stop_) {
+      force_stop_ = false;
+      pci_status_ = PCIStatus::kError;
+    } else {
+      pci_status_ = PCIStatus::kReady;
+    }
+    ROS_INFO("Waiting done.");
+  } else {
+    ROS_ERROR("PCIMAV::executePath --> Not support.");
+  }
+  ROS_WARN("PCI: Ready to trigger the planner.");
+}
+
 
 void PCIMAV::interpolatePath(const std::vector<geometry_msgs::Pose> &path,
                                    std::vector<geometry_msgs::Pose> &path_res) {
