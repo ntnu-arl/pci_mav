@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(pci_mav)
 
-add_definitions(-std=c++11)
+add_definitions(-std=c++11 -Wall -Wno-sign-compare -Werror=return-type)
 
 find_package(catkin_simple REQUIRED)
 find_package(Eigen3 REQUIRED)

@@ -216,7 +216,10 @@ PCIMAV::generateTrajectoryMarkerArray(
   mo.frame_locked = false;
 
   for (size_t i = 0; i < traj.points.size() - 1; ++i) {
-    m_arr->markers.empty() ?: ++me.id, ++mo.id;
+    if(!m_arr->markers.empty()) {
+      ++me.id;
+      ++mo.id;
+    }
     auto ti_v3 = traj.points.at(i).transforms.at(0).translation;
     auto tip1_v3 = traj.points.at(i + 1).transforms.at(0).translation;
     auto &me_p0 = me.points.at(0);
@@ -239,7 +242,9 @@ PCIMAV::generateTrajectoryMarkerArray(
     mo.pose.orientation.w = ti_q.w;
     m_arr->markers.push_back(mo);
   }
-  m_arr->markers.empty() ?: ++mo.id;
+  if(!m_arr->markers.empty()) {
+    ++mo.id;
+  }
   auto tb_v3 = traj.points.back().transforms.at(0).translation;
   mo.pose.position.x = tb_v3.x;
   mo.pose.position.y = tb_v3.y;
@@ -306,7 +311,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
 
   // Execute the path.
   if (run_mode_ == RunModeType::kSim) {
-    // In simulation, have to interpolate the path to make it works smoother,
+    // In simulation, the path needs to be interpolated for smoother behavior,
     // since it is using lee-controller.
     n_seq_++;
     std::vector<geometry_msgs::Pose> path_intp;
@@ -343,7 +348,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
       ros::Duration(delta_wait).sleep();
       ros::spinOnce();
     }
-    // If stop before the wait-time, trigger as an error.
+    // If stopped before end of the wait-time, trigger as an error.
     // Need this to reset everything to default mode.
     if (force_stop_) {
       force_stop_ = false;
@@ -417,6 +422,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
     ROS_ERROR("PCIMAV::executePath --> Not support.");
   }
   ROS_WARN("PCI: Ready to trigger the planner.");
+  return true;
 }
 
 void PCIMAV::interpolatePath(const std::vector<geometry_msgs::Pose> &path,
@@ -790,6 +796,8 @@ double PCIMAV::getVelocity(ExecutionPathType path_type) {
     return v_homing_max_;
   } else if (path_type == ExecutionPathType::kNarrowEnvPath) {
     return v_narrow_env_max_;
+  } else {
+    return v_max_;  // By default return maximum velocity for local path execution
   }
 }
 
