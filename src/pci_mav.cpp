@@ -417,6 +417,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
     ROS_ERROR("PCIMAV::executePath --> Not support.");
   }
   ROS_WARN("PCI: Ready to trigger the planner.");
+  return true;
 }
 
 void PCIMAV::interpolatePath(const std::vector<geometry_msgs::Pose> &path,
