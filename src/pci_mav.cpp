@@ -242,7 +242,9 @@ PCIMAV::generateTrajectoryMarkerArray(
     mo.pose.orientation.w = ti_q.w;
     m_arr->markers.push_back(mo);
   }
-  if(!m_arr->markers.empty()) ++mo.id;
+  if(!m_arr->markers.empty()) {
+    ++mo.id;
+  }
   auto tb_v3 = traj.points.back().transforms.at(0).translation;
   mo.pose.position.x = tb_v3.x;
   mo.pose.position.y = tb_v3.y;
