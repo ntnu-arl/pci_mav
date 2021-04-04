@@ -216,7 +216,10 @@ PCIMAV::generateTrajectoryMarkerArray(
   mo.frame_locked = false;
 
   for (size_t i = 0; i < traj.points.size() - 1; ++i) {
-    m_arr->markers.empty() ?: ++me.id, ++mo.id;
+    if(!m_arr->markers.empty()) {
+      ++me.id;
+      ++mo.id;
+    }
     auto ti_v3 = traj.points.at(i).transforms.at(0).translation;
     auto tip1_v3 = traj.points.at(i + 1).transforms.at(0).translation;
     auto &me_p0 = me.points.at(0);
@@ -239,7 +242,7 @@ PCIMAV::generateTrajectoryMarkerArray(
     mo.pose.orientation.w = ti_q.w;
     m_arr->markers.push_back(mo);
   }
-  m_arr->markers.empty() ?: ++mo.id;
+  if(!m_arr->markers.empty()) ++mo.id;
   auto tb_v3 = traj.points.back().transforms.at(0).translation;
   mo.pose.position.x = tb_v3.x;
   mo.pose.position.y = tb_v3.y;
@@ -791,6 +794,8 @@ double PCIMAV::getVelocity(ExecutionPathType path_type) {
     return v_homing_max_;
   } else if (path_type == ExecutionPathType::kNarrowEnvPath) {
     return v_narrow_env_max_;
+  } else {
+    return v_max_;  // By default return maximum velocity for local path execution
   }
 }
 
