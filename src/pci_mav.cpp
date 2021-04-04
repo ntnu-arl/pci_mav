@@ -306,7 +306,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
 
   // Execute the path.
   if (run_mode_ == RunModeType::kSim) {
-    // In simulation, have to interpolate the path to make it works smoother,
+    // In simulation, the path needs to be interpolated for smoother behavior,
     // since it is using lee-controller.
     n_seq_++;
     std::vector<geometry_msgs::Pose> path_intp;
@@ -343,7 +343,7 @@ bool PCIMAV::executePath(const std::vector<geometry_msgs::Pose> &path,
       ros::Duration(delta_wait).sleep();
       ros::spinOnce();
     }
-    // If stop before the wait-time, trigger as an error.
+    // If stopped before end of the wait-time, trigger as an error.
     // Need this to reset everything to default mode.
     if (force_stop_) {
       force_stop_ = false;
